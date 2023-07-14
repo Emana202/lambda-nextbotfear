@@ -8,6 +8,7 @@ local ipairs = ipairs
 local IsValid = IsValid
 local CurTime = CurTime
 local SimpleTimer = timer.Simple
+local random = math.random
 local ai_ignoreplayers = GetConVar( "ai_ignoreplayers" )
 local GetConVar = GetConVar
 local FindInSphere = ents.FindInSphere
@@ -21,16 +22,16 @@ end
 local function OnLambdaThink( self, wepent, isDead )
     if CurTime() < self.l_nextbotfearcooldown then return end
     self.l_nextbotfearcooldown = ( CurTime() + 0.5 )
-    if isDead or !self:IsPanicking() then return end
+    if isDead then return end
 
     local sanics = sanicenable:GetBool()
     local drgs = drgenable:GetBool()
-    local nearNextbot = self:GetClosestEntity( nil, 3000, function( ent ) 
+    local nearNextbot = self:GetClosestEntity( nil, 2000, function( ent ) 
         return ( ( ent:IsNextBot() and ( sanics and ent.LastPathingInfraction or drgs and ent.IsDrGNextbot ) ) and self:CanTarget( ent ) and self:CanSee( ent ) )
     end )
-    
+
     if !nearNextbot then return end
-    self:RetreatFrom( ent )
+    self:RetreatFrom( nearNextbot )
 end
 
 hook.Add( "LambdaOnInitialize", "lambdanextbotfearmodule_init", OnLambdaInitialize )
@@ -80,7 +81,7 @@ local function GetNearestTarget( self )
         if spawnProtect and ent:IsPlayer() and IsPointNearSpawn( entPos, 200 ) then continue end
 
         local distSqr = entPos:DistToSqr( selfPos )
-        if distSqr >= maxAcquireDistSqr then continue ned
+        if distSqr >= maxAcquireDistSqr then continue end
 
         closestEnt = ent
         maxAcquireDistSqr = distSqr
@@ -96,7 +97,7 @@ local function AttackNearbyTargets( self, radius )
     attackForce = ( attackForce and attackForce:GetInt() or 800 )
     
     local smashProps = GetConVar( selfClass .. "_smash_props" )
-    smashProps = ( smashProps and attackForce:GetBool() or true )
+    smashProps = ( smashProps and smashProps:GetBool() or true )
 
     local hit = false
     local hitSource = self:WorldSpaceCenter()
