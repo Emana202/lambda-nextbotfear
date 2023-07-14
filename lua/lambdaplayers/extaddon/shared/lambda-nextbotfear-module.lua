@@ -1,134 +1,177 @@
+local sanicenable = CreateLambdaConvar( "lambdaplayers_lambda_fearnextbots", 1, true, false, false, "If Lambda Players should run away from sanic type nextbots", 0, 1, { type = "Bool", name = "Fear Sanic Nextbots", category = "Lambda Server Settings" } )
+local drgenable = CreateLambdaConvar( "lambdaplayers_lambda_feardrgnextbots", 0, true, false, false, "If Lambda Players should run away from DRGBase nextbots", 0, 1, { type = "Bool", name = "Fear DRGBase Nextbots", category = "Lambda Server Settings" } )
+if ( CLIENT ) then return end
+
+--
+
 local ipairs = ipairs
 local IsValid = IsValid
+local CurTime = CurTime
+local SimpleTimer = timer.Simple
+local ai_ignoreplayers = GetConVar( "ai_ignoreplayers" )
+local GetConVar = GetConVar
+local FindInSphere = ents.FindInSphere
+local constraint_RemoveAll = constraint.RemoveAll
+local DamageInfo = DamageInfo
 
-local sanicenable = CreateLambdaConvar( "lambdaplayers_lambda_fearnextbots", 1, true, false, false, "If Lambda Players should run away from sanic type nextbots", 0, 1, { type = "Bool", name = "Fear Sanic Nextbots", category = "Lambda Server Settings" } )
-local drgenable = CreateLambdaConvar( "lambdaplayers_lambda_feardrgnextbots", 1, true, false, false, "If Lambda Players should run away from DRGBase nextbots", 0, 1, { type = "Bool", name = "Fear DRGBase Nextbots", category = "Lambda Server Settings" } )
-
-
-
-local function Initialize( self )
-    self.l_nextbotfearcooldown = 0 -- Delay the code for optimization
+local function OnLambdaInitialize( self )
+    self.l_nextbotfearcooldown = ( CurTime() + 0.5 )
 end
 
-local function Think( self )
-    if CLIENT then return end 
+local function OnLambdaThink( self, wepent, isDead )
+    if CurTime() < self.l_nextbotfearcooldown then return end
+    self.l_nextbotfearcooldown = ( CurTime() + 0.5 )
+    if isDead or !self:IsPanicking() then return end
 
-    if CurTime() > self.l_nextbotfearcooldown and self:GetState() != "Retreat" then
-        local near = self:FindInSphere( nil, 3000, function( ent ) return ( !ent.IsLambdaPlayer and ent:IsNextBot() and ( sanicenable:GetBool() and isfunction( ent.AttackNearbyTargets ) or drgenable:GetBool() and ent.IsDrGNextbot ) ) and self:CanSee( ent ) end )
-
-        local closest
-        local dist = math.huge
-
-        for k, nextbot in ipairs( near ) do
-            local newdist = self:GetRangeSquaredTo( nextbot )
-            if newdist < dist then
-                closest = nextbot 
-                dist = newdist
-            end
-        end
-
-        if IsValid( closest ) then
-            self:RetreatFrom()
-        end
-
-        self.l_nextbotfearcooldown = CurTime() + 0.5
-    end
-end
-
-
-hook.Add( "LambdaOnInitialize", "lambdanextbotfearmodule_init", Initialize )
-hook.Add( "LambdaOnThink", "lambdanextbotfearmodule_think", Think )
-
-
-
-
-
-if SERVER then
-
-    -- Pretty much ported from the zetas but I really don't see anything wrong with this code.
-    -- Just needed a little cleaning
-    hook.Add( "OnEntityCreated", "lambdanextbotfearmodule_entitycreate", function( ent )
-        timer.Simple( 0, function()
-            if !IsValid( ent ) then return end
-
-            local entClass = ent:GetClass()
-            if entClass == "npc_sanic" or (ent:IsNextBot() and isfunction( ent.AttackNearbyTargets ) ) then
-
-                local id = ent:GetCreationID()
-                hook.Add( "Think", "zeta_sanicNextbotsSupport_" .. id, function()
-                    if !IsValid( ent ) then hook.Remove( "Think", "zeta_sanicNextbotsSupport_" .. id ) return end
-                    
-                    local scanTime = GetConVar( entClass .. "_expensive_scan_interval" ):GetInt() or 1
-
-                    if ( CurTime() - ent.LastTargetSearch ) > scanTime then
-                        ent.ClosestLambda = nil
-                        
-                        local lastDist = math.huge
-                        local chaseDist = GetConVar( entClass .. "_acquire_distance" ):GetInt() or 2500
-                        local lambdas = ents.FindByClass( "npc_lambdaplayer" )
-
-                        for i = 1, #lambdas  do
-                            if !lambdas[ i ]:Alive() then continue end
-
-                            local distSqr = ent:GetRangeSquaredTo( lambdas[ i ] )
-
-                            if distSqr <= ( chaseDist * chaseDist ) and distSqr < lastDist then
-                                ent.ClosestLambda = lambdas[ i ]
-                                lastDist = distSqr
-                            end
-                        end
-                    end
-
-                    local closestlambda = ent.ClosestLambda
-                    if !IsValid( closestlambda ) then return end 
-                    
-                    local curTarget = ent.CurrentTarget
-                    local lambdadist = ent:GetRangeSquaredTo( closestlambda )
-                    
-                    if ent.CurrentTarget != closestlambda then
-
-                        if !IsValid( curTarget ) or ( ent:GetRangeSquaredTo( curTarget ) > lambdadist and closestlambda != curTarget ) then
-                            ent.CurrentTarget = closestlambda
-                        end
-
-                    elseif closestlambda:Alive() then
-
-                        local dmgDist = GetConVar( entClass .. "_attack_distance" ):GetInt() or 80
-                        if lambdadist > ( dmgDist * dmgDist ) then return end
-                        
-                        local startHP = closestlambda:Health()
-
-                        local attackForce = GetConVar( entClass .. "_attack_force" ):GetInt() or 800
-                        if isfunction( ent.AttackOpponent ) then
-                            ent:AttackOpponent( closestlambda, ent:GetPos(), attackForce )
-                        else 
-                            local dmgInfo = DamageInfo()
-                            dmgInfo:SetAttacker( ent )
-                            dmgInfo:SetInflictor( ent )
-                            dmgInfo:SetDamage( 1e8 )
-                            dmgInfo:SetDamagePosition( ent:GetPos() )
-                            dmgInfo:SetDamageForce( ( (closestlambda:GetPos() - ent:GetPos() ):GetNormal() * attackForce + ent:GetUp() * 500 ) * 100 )
-                            closestlambda:TakeDamageInfo(dmgInfo)
-
-                            ent:EmitSound( "physics/body/body_medium_impact_hard" .. math.random( 6 ) .. ".wav", 350, 120)
-                        end
-
-                        if closestlambda:Health() < startHP then 
-                            if ent.TauntSounds and ( CurTime() - ent.LastTaunt ) > 1.2 then
-                                ent.LastTaunt = CurTime()
-                                local snd = ent.TauntSounds[ math.random( #ent.TauntSounds ) ]
-                                if snd == nil then snd = ent.TauntSounds end
-                                if isstring( snd ) then
-                                    ent:EmitSound( snd, 350, 100 )
-                                end
-                            end
-
-                            ent.LastTargetSearch = 0
-                        end
-                    end
-                end)
-            end
-        end )
+    local sanics = sanicenable:GetBool()
+    local drgs = drgenable:GetBool()
+    local nearNextbot = self:GetClosestEntity( nil, 3000, function( ent ) 
+        return ( ( ent:IsNextBot() and ( sanics and ent.LastPathingInfraction or drgs and ent.IsDrGNextbot ) ) and self:CanTarget( ent ) and self:CanSee( ent ) )
     end )
-
+    
+    if !nearNextbot then return end
+    self:RetreatFrom( ent )
 end
+
+hook.Add( "LambdaOnInitialize", "lambdanextbotfearmodule_init", OnLambdaInitialize )
+hook.Add( "LambdaOnThink", "lambdanextbotfearmodule_think", OnLambdaThink )
+
+--
+
+local function IsValidTarget( self, ent )
+    if !IsValid( ent ) then return false end
+    if ent.IsLambdaPlayer then return ent:Alive() end
+    if ent:IsPlayer() then return ( ent:Alive() and !ai_ignoreplayers:GetBool() ) end
+
+    local class = ent:GetClass()
+    return ( ent:IsNPC() and ent:Health() > 0 and class != self:GetClass() and !class:find( "bullseye" ) )
+end
+
+local function IsPointNearSpawn( point, distance )
+    local spawnPoints = GAMEMODE.SpawnPoints
+    if spawnPoints or #spawnPoints == 0 then return false end
+
+    distance = ( distance * distance )
+    for _, spawnPoint in ipairs( spawnPoints ) do
+        if !IsValid( spawnPoint ) or point:DistToSqr( spawnPoint:GetPos() ) <= distance then continue end
+        return true
+    end
+
+    return false
+end
+
+local function GetNearestTarget( self )
+    local selfClass = self:GetClass()
+
+    local maxAcquireDist = GetConVar( selfClass .. "_acquire_distance" )
+    maxAcquireDist = ( maxAcquireDist and maxAcquireDist:GetInt() or 2500 )
+    
+    local maxAcquireDistSqr = ( maxAcquireDist * maxAcquireDist )
+    local selfPos = self:GetPos()
+    local closestEnt
+
+    local spawnProtect = GetConVar( selfClass .. "_spawn_protect" )
+    spawnProtect = ( spawnProtect and spawnProtect:GetBool() or true )
+
+    for _, ent in ipairs( FindInSphere( selfPos, maxAcquireDist ) ) do
+        if !self:IsValidTarget( ent ) then continue end
+
+        local entPos = ent:GetPos()
+        if spawnProtect and ent:IsPlayer() and IsPointNearSpawn( entPos, 200 ) then continue end
+
+        local distSqr = entPos:DistToSqr( selfPos )
+        if distSqr >= maxAcquireDistSqr then continue ned
+
+        closestEnt = ent
+        maxAcquireDistSqr = distSqr
+    end
+
+    return closestEnt
+end
+
+local function AttackNearbyTargets( self, radius )
+    local selfClass = self:GetClass()
+
+    local attackForce = GetConVar( selfClass .. "_attack_force" )
+    attackForce = ( attackForce and attackForce:GetInt() or 800 )
+    
+    local smashProps = GetConVar( selfClass .. "_smash_props" )
+    smashProps = ( smashProps and attackForce:GetBool() or true )
+
+    local hit = false
+    local hitSource = self:WorldSpaceCenter()
+
+    for _, ent in ipairs( FindInSphere( hitSource, radius ) ) do
+        if !self:IsValidTarget( ent ) then 
+            if smashProps and ent:GetMoveType() == MOVETYPE_VPHYSICS and ( !ent:IsVehicle() or !IsValid( ent:GetDriver() ) ) then 
+                local phys = ent:GetPhysicsObject()
+                if IsValid( phys ) then
+                    constraint.RemoveAll( ent )
+
+                    local mass = phys:GetMass()
+                    if mass >= 5 then ent:EmitSound( phys:GetMaterial() .. ".ImpactHard", 350, 120 ) end
+
+                    local hitDirection = ( ent:WorldSpaceCenter() - hitSource ):GetNormalized()
+                    local hitOffset = ent:NearestPoint( hitSource )
+                    for i = 0, ( ent:GetPhysicsObjectCount() - 1 ) do
+                        phys = ent:GetPhysicsObjectNum( i )
+                        if !IsValid( phys ) then continue end
+                        
+                        phys:EnableMotion(true)
+                        phys:ApplyForceOffset( hitDirection * ( attackForce * mass ), hitOffset )
+                    end
+                end
+                ent:TakeDamage( 25, self, self )
+            end
+            
+            continue 
+        end
+
+        if ent:IsPlayer() and IsValid( ent:GetVehicle() ) then
+            local vehicle = ent:GetVehicle()
+
+            local phys = vehicle:GetPhysicsObject()
+            if IsValid(phys) then
+                phys:Wake()
+                local hitDirection = ( vehicle:WorldSpaceCenter() - hitSource ):GetNormalized()
+                phys:ApplyForceOffset( hitDirection * ( attackForce * phys:GetMass() ), vehicle:NearestPoint(hitSource) )
+            end
+
+            vehicle:TakeDamage( math.huge, self, self )
+            vehicle:EmitSound( "physics/metal/metal_sheet_impact_hard" .. random( 6, 8 ) .. ".wav", 350, 120 )
+        else
+            ent:EmitSound( "physics/body/body_medium_impact_hard" .. random( 6 ) .. ".wav", 350, 120 )
+        end
+
+        local hitDirection = ( ent:GetPos() - hitSource ):GetNormalized()
+        local hitForce = ( hitDirection * attackForce + vector_up * 500 )
+        ent:SetVelocity( hitForce )
+
+        local oldHealth = ent:Health()
+
+        local dmginfo = DamageInfo()
+        dmginfo:SetAttacker( self )
+        dmginfo:SetInflictor( self )
+        dmginfo:SetDamage( math.huge )
+        dmginfo:SetDamagePosition( hitSource )
+        dmginfo:SetDamageForce( hitForce * 100 )
+
+        ent:TakeDamageInfo( dmginfo )
+        if !hit then hit = ( ent:Health() < oldHealth )  end
+    end
+
+    return hit
+end
+
+--
+
+local function OnEntityCreated( ent )
+    SimpleTimer( 0, function()
+        if !IsValid( ent ) or !ent.LastPathingInfraction or !ent:IsNextBot() then return end
+        ent.GetNearestTarget = GetNearestTarget
+        ent.IsValidTarget = IsValidTarget
+        ent.AttackNearbyTargets = AttackNearbyTargets
+    end )
+end
+
+hook.Add( "OnEntityCreated", "lambdanextbotfearmodule_entitycreate", OnEntityCreated )
