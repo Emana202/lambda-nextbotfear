@@ -1,7 +1,8 @@
-local sanicenable = CreateLambdaConvar( "lambdaplayers_lambda_fearnextbots", 1, true, false, false, "If Lambda Players should run away from sanic type nextbots", 0, 1, { type = "Bool", name = "Fear Sanic Nextbots", category = "Lambda Server Settings" } )
-local drgenable = CreateLambdaConvar( "lambdaplayers_lambda_feardrgnextbots", 0, true, false, false, "If Lambda Players should run away from DRGBase nextbots", 0, 1, { type = "Bool", name = "Fear DRGBase Nextbots", category = "Lambda Server Settings" } )
-if ( CLIENT ) then return end
+local sanicenable = CreateLambdaConvar( "lambdaplayers_lambda_fearnextbots", 1, true, false, false, "If Lambda Players should run away from sanic type nextbots", 0, 1, { type = "Bool", name = "Fear Sanic Nextbots", category = "Combat" } )
+local drgenable = CreateLambdaConvar( "lambdaplayers_lambda_feardrgnextbots", 0, true, false, false, "If Lambda Players should run away from DRGBase nextbots", 0, 1, { type = "Bool", name = "Fear DRGBase Nextbots", category = "Combat" } )
+local fearrange = CreateLambdaConvar( "lambdaplayers_lambda_fearrange", 2000, true, false, false, "How close should the nextbot be to be detectable by Lambda Players", 0, 10000, { type = "Slider", decimals = 0, name = "Fear Spot Distance", category = "Combat" } )
 
+if ( CLIENT ) then return end
 --
 
 local ipairs = ipairs
@@ -26,8 +27,9 @@ local function OnLambdaThink( self, wepent, isDead )
 
     local sanics = sanicenable:GetBool()
     local drgs = drgenable:GetBool()
-    local nearNextbot = self:GetClosestEntity( nil, 2000, function( ent ) 
-        return ( ( ent:IsNextBot() and ( sanics and ent.LastPathingInfraction or drgs and ent.IsDrGNextbot ) ) and self:CanTarget( ent ) and self:CanSee( ent ) )
+    local nearNextbot = self:GetClosestEntity( nil, fearrange:GetInt(), function( ent )
+        if !ent:IsNextBot() or ( !ent.LastPathingInfraction or !sanics ) and ( !ent.IsDrGNextbot or !drgs ) then return false end
+        return ( self:CanTarget( ent ) and self:CanSee( ent ) )
     end )
 
     if !nearNextbot then return end
